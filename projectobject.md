@@ -23,3 +23,11 @@ Demo Value:
 💡 Freelancing Pitch Line:
 “I built a Python-based student result management system for schools and tutors.”
 
+🧭 WHAT WE ARE BUILDING (Clear Goal)
+
+    A simple application where:
+    Teacher adds student details
+    Enters marks
+    Program calculates Total + Grade
+    Data is saved permanently using SQLite
+    Results can be viewed anytime
