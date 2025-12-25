@@ -1,6 +1,12 @@
 import sqlite3
+import os
 
-conn = sqlite3.connect("results.db")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "results.db")
+
+print("Creating DB at:", DB_PATH)
+
+conn = sqlite3.connect(DB_PATH)
 cursor = conn.cursor()
 
 cursor.execute("""

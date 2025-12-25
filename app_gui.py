@@ -1,6 +1,14 @@
+import os
+import sqlite3
 import tkinter as tk
 from tkinter import messagebox
-import sqlite3
+import pandas as pd
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "results.db")
+
+print("DB PATH:", DB_PATH)
+
 
 # ---------- DATABASE FUNCTIONS ----------
 def calculate_grade(total):
@@ -26,7 +34,7 @@ def add_student():
     total = int(s1) + int(s2) + int(s3)
     grade = calculate_grade(total)
 
-    conn = sqlite3.connect("results.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO students (name, subject1, subject2, subject3, total, grade)
@@ -39,7 +47,7 @@ def add_student():
     clear_fields()
 
 def view_results():
-    conn = sqlite3.connect("results.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT name, total, grade FROM students")
     rows = cursor.fetchall()
@@ -54,6 +62,31 @@ def clear_fields():
     entry_s1.delete(0, tk.END)
     entry_s2.delete(0, tk.END)
     entry_s3.delete(0, tk.END)
+
+def export_to_excel():
+    conn = sqlite3.connect(DB_PATH)
+    
+    query = """
+    SELECT name AS Name,
+           subject1 AS Subject1,
+           subject2 AS Subject2,
+           subject3 AS Subject3,
+           total AS Total,
+           grade AS Grade
+    FROM students
+    """
+    
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+
+    if df.empty:
+        messagebox.showwarning("No Data", "No student records found!")
+        return
+
+    file_name = "Student_Results.xlsx"
+    df.to_excel(file_name, index=False)
+
+    messagebox.showinfo("Success", f"Results exported to {file_name}")
 
 # ---------- GUI ----------
 root = tk.Tk()
@@ -79,6 +112,7 @@ entry_s3 = tk.Entry(root)
 entry_s3.pack()
 
 tk.Button(root, text="Add Result", command=add_student).pack(pady=10)
+tk.Button(root, text="Export to Excel", command=export_to_excel).pack(pady=5)
 tk.Button(root, text="View Results", command=view_results).pack()
 
 result_text = tk.Text(root, height=10)
