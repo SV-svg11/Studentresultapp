@@ -1,14 +1,32 @@
+#needed modules for the application
 import os
 import sqlite3
 import tkinter as tk
 from tkinter import messagebox
 import pandas as pd
+
+#-------------------------------------------------------------------------------------------------------------------------------------------#
+
+#Databases paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "results.db")
 USERS_DB = os.path.join(BASE_DIR, "users.db")
 
+#-------------------------------------------------------------------------------------------------------------------------------------------#
+
 def init_users_db():
-    pass
+    conn = sqlite3.connect(USERS_DB)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            password TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
 def init_students_db():
     DB_PATH = os.path.join(BASE_DIR, "results.db")
     conn = sqlite3.connect(DB_PATH)
@@ -53,7 +71,29 @@ def init_exams_db():
                 ); """)
     conn.commit()
     conn.close()
+def init_marks_db():
+    DB_PATH = os.path.join(BASE_DIR, "results.db")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS marks(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,  
+                admission_no TEXT NOT NULL,
+                exam_id INTEGER NOT NULL, 
+                score INTEGER NOT NULL
+
+                ); """)
+    conn.commit()
+    conn.close()
 class StudentResultApp:
+    def open_register_student(self):
+        self.register_window = tk.Toplevel(self.root)
+        self.register_window.title("Register Student")
+        self.register_window.geometry("400x300")
+        tk.Label(self.register_window, text="Student Registration", font=("Calibri", 20, "bold")).pack()
+
+
+    
     def add_exam(self):
         exam_type = self.exam_type_var.get()
         exam_number = self.entry_exam_number.get().strip()
@@ -104,13 +144,11 @@ class StudentResultApp:
         conn.close()
 
         messagebox.showinfo("Success", f"Exam {exam_name} added successfully")
-
-
-
-
     def __init__(self):    
         init_users_db()
         init_students_db()
+        init_exams_db()
+        init_marks_db()
         self.show_login()
     def show_login(self):
         self.login_window = tk.Tk()
@@ -217,7 +255,7 @@ class StudentResultApp:
         self.entry_class = tk.Entry(self.root)
         self.entry_class.pack()
         
-        tk.Label(self.root, text="Subject 1 Marks").pack()
+        """tk.Label(self.root, text="Subject 1 Marks").pack()
         self.entry_s1 = tk.Entry(self.root)
         self.entry_s1.pack()
 
@@ -227,23 +265,24 @@ class StudentResultApp:
 
         tk.Label(self.root, text="Subject 3 Marks").pack()
         self.entry_s3 = tk.Entry(self.root)
-        self.entry_s3.pack()
+        self.entry_s3.pack()"""
 
-        tk.Button(self.root, text="Add Result",
-                  command=self.add_student).pack(pady=5)
+        tk.Button(self.root, text="Add Result", command=self.add_student).pack(pady=5)
+        tk.Button(self.root,text="Register Student",command=self.open_register_student).pack(pady=5)
+
 
         tk.Label(self.root, text="Search (Name / ID)").pack()
         self.entry_search = tk.Entry(self.root)
         self.entry_search.pack()
 
-        tk.Button(self.root, text="Search",
-                  command=self.search_student).pack(pady=5)
+        tk.Button(self.root,text="Enter Marks",command=self.open_marks_window).pack(pady=5)
 
-        tk.Button(self.root, text="View Results",
-                  command=self.view_results).pack(pady=5)
 
-        tk.Button(self.root, text="Export to Excel",
-                  command=self.export_to_excel).pack(pady=5)
+        #tk.Button(self.root, text="Search", command=self.search_student).pack(pady=5)
+
+        #tk.Button(self.root, text="View Results",command=self.view_results).pack(pady=5)
+
+        #tk.Button(self.root, text="Export to Excel",  command=self.export_to_excel).pack(pady=5)
 
         self.result_text = tk.Text(self.root, height=10)
         self.result_text.pack(pady=10)
@@ -276,6 +315,70 @@ class StudentResultApp:
 
 
         self.root.mainloop()
+    def open_marks_window(self):
+        self.marks_window=tk.Toplevel(self.root)
+        self.marks_window.title("Enter Marks")  
+        self.marks_window.geometry("400x300")
+
+        tk.Label(self.marks_window, text="Enter Marks for Each Subject").pack(pady=10)
+        DB_PATH = os.path.join(BASE_DIR, "results.db")
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, exam_name, academic_year FROM exams")
+        rows = cursor.fetchall()
+        conn.close()
+        exams = [rows[1] for rows in rows]
+        self.exam_var = tk.StringVar()
+        tk.OptionMenu(self.marks_window, self.exam_var, *exams).pack(pady=5)
+        tk.Label(self.marks_window, text="Admission No").pack()
+        self.entry_admission_no = tk.Entry(self.marks_window)
+        self.entry_admission_no.pack()
+
+        selected_exam = self.exam_var.get()
+
+        tk.Label(self.marks_window, text="Score").pack()
+        self.entry_score = tk.Entry(self.marks_window)
+        self.entry_score.pack()
+
+        def save_marks():
+            admission_no = self.entry_admission_no.get().strip()
+            selected_exam = self.exam_var.get()
+            score = self.entry_score.get().strip()
+            if not admission_no or not selected_exam or not score:
+                messagebox.showerror("Error", "All fields required")
+                return
+            if not score.isdigit():
+                messagebox.showerror("Error", "Score must be a number")
+                return
+            score = int(score)
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM students WHERE admission_no=?", (admission_no,))
+            if not cursor.fetchone():
+                messagebox.showerror("Error", "No student found")
+                conn.close()
+                return
+            cursor.execute("SELECT id FROM exams WHERE exam_name=?", (selected_exam,))
+            row = cursor.fetchone()
+            if row is None:
+                messagebox.showerror("Error", "Invalid exam")
+                conn.close()
+                return
+            exam_id = row[0]
+            cursor.execute("""
+                INSERT INTO marks (student_admission_no, exam_id, score)
+                VALUES (?, ?, ?)
+            """, (admission_no, exam_id, score))
+
+            conn.commit()
+            conn.close()
+            messagebox.showinfo("Success", "Marks saved successfully")
+
+        tk.Button(self.marks_window, text="Save Marks", command=save_marks).pack(pady=10)
+
+
+
+        print(rows)
     def calculate_grade(self, total):
         if total >= 270:
             return "A"
