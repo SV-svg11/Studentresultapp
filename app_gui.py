@@ -66,8 +66,48 @@ class StudentResultApp:
         if not max_marks.isdigit():
             messagebox.showerror("Error", "Max marks must be a number")
             return
-        if exam_number.isdigit():
-            exam_name = f"Exam {exam_number}"
+        if not exam_number.isdigit():
+            messagebox.showerror("Error", "Exam number must be a number")
+            return
+        
+        academic_year = academic_year
+
+        if "-" not in academic_year:
+            messagebox.showerror("Error", "Academic year must be in format YYYY-YY")
+            return
+        
+        parts = academic_year.split("-")
+        if len(parts) !=2:
+            messagebox.showerror("Error", "Academic year must be in format YYYY-YY")
+            return
+        
+        start_year = parts[0]
+        end_year = parts[1]
+
+        if len(start_year) !=4 or len(end_year) !=2 or not start_year.isdigit() or not end_year.isdigit():
+            messagebox.showerror("Error", "Academic year must be in format YYYY-YY")
+            return
+
+        exam_number = int(exam_number)
+        max_marks = int(max_marks)
+
+        exam_name = f"{exam_type}-{exam_number}"
+        print(exam_name)
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO exams (exam_name, exam_type, academic_year, max_marks)
+            VALUES (?, ?, ?, ?)
+        """, (exam_name, exam_type, academic_year, max_marks))
+        conn.commit()
+        conn.close()
+
+        messagebox.showinfo("Success", f"Exam {exam_name} added successfully")
+
+
+
+
     def __init__(self):    
         init_users_db()
         init_students_db()
@@ -221,8 +261,16 @@ class StudentResultApp:
         self.entry_max_marks = tk.Entry(self.root)
         self.entry_max_marks.pack()
 
-        tk.Label(self.root, text="Exam Type").pack()
-        self.exam_type_var = tk.OptionMenu(self.root, tk.StringVar(value="Midterm"), "PT", "TE", "CT").pack()
+        self.exam_type_var = tk.StringVar()
+        self.exam_type_var.set("PT")   # default value
+
+        tk.OptionMenu(
+            self.root,
+            self.exam_type_var,
+            "PT",
+            "TE"
+        ).pack()
+
 
         tk.Button(self.root, text="Add Exam" , command=self.add_exam).pack(pady=5)
 
