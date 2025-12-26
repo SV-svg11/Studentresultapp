@@ -1,4 +1,5 @@
 #needed modules for the application
+from email.mime import text
 import os
 import sqlite3
 import tkinter as tk
@@ -14,14 +15,51 @@ USERS_DB = os.path.join(BASE_DIR, "users.db")
 
 #-------------------------------------------------------------------------------------------------------------------------------------------#
 
+def migrate_users_table():
+    conn = sqlite3.connect(USERS_DB)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN role TEXT")
+        cursor.execute("UPDATE users SET role='supervisor' WHERE role IS NULL")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
+    conn.close()
+
+
+def fetch_class_exam_report(class_name, exam_name):
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        SELECT
+            s.admission_no,
+            s.student_name,
+            m.score,
+            e.max_marks,
+            ROUND((m.score * 100.0) / e.max_marks, 2) AS percentage
+
+            FROM students s
+            JOIN marks m ON s.admission_no = m.admission_no
+            JOIN exams e ON m.exam_id = e.id
+            WHERE s.class_name = ?
+            AND e.exam_name = ?
+        """, (class_name, exam_name))
+
+        rows = cursor.fetchall()
+        conn.close()
+        return rows
 def init_users_db():
     conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL,
-            password TEXT NOT NULL
+            username TEXT NOT NULL UNIQUE,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('supervisor', 'account'))
         )
     """)
     conn.commit()
@@ -85,15 +123,57 @@ def init_marks_db():
                 ); """)
     conn.commit()
     conn.close()
+
 class StudentResultApp:
+    
     def open_register_student(self):
         self.register_window = tk.Toplevel(self.root)
         self.register_window.title("Register Student")
         self.register_window.geometry("400x300")
-        tk.Label(self.register_window, text="Student Registration", font=("Calibri", 20, "bold")).pack()
 
+        tk.Label(
+            self.register_window,
+            text="Student Registration",
+            font=("Calibri", 20, "bold")
+        ).pack(pady=10)
 
-    
+        tk.Label(self.register_window, text="Student Name").pack()
+        self.reg_entry_name = tk.Entry(self.register_window)
+        self.reg_entry_name.pack(pady=5)
+
+        tk.Label(self.register_window, text="Admission Year").pack()
+        self.reg_entry_year = tk.Entry(self.register_window)
+        self.reg_entry_year.pack(pady=5)
+
+        tk.Label(self.register_window, text="Class Name").pack()
+        self.reg_entry_class = tk.Entry(self.register_window)
+        self.reg_entry_class.pack(pady=5)
+
+        tk.Button(
+            self.register_window,
+            text="Register",
+            command=self.register_student
+        ).pack(pady=10)
+    def register_student(self):
+        student_name = self.reg_entry_name.get().strip()
+        admission_year = self.reg_entry_year.get().strip()
+        class_name = self.reg_entry_class.get().strip()
+
+        if not admission_year.isdigit():
+            messagebox.showerror("Error", "Admission year must be a number")
+            return
+        admission_year = int(admission_year)
+        year_serial, admission_no = generate_admission_no(admission_year)
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO students(admission_year, year_serial, admission_no, student_name, class_name)
+               VALUES (?, ?, ?, ?, ?)
+        """, (admission_year, year_serial, admission_no, student_name, class_name))
+        conn.commit()
+        conn.close()
+        messagebox.showinfo("Success", f"Student registered successfully\nAdmission No: {admission_no}")
+        tk.Button(self.register_window, text="Register", command=self.register_student).pack(pady=10)
     def add_exam(self):
         exam_type = self.exam_type_var.get()
         exam_number = self.entry_exam_number.get().strip()
@@ -146,6 +226,8 @@ class StudentResultApp:
         messagebox.showinfo("Success", f"Exam {exam_name} added successfully")
     def __init__(self):    
         init_users_db()
+        migrate_users_table()
+
         init_students_db()
         init_exams_db()
         init_marks_db()
@@ -160,6 +242,19 @@ class StudentResultApp:
             text="Student Result System",
             font=("Arial", 16)
         ).pack(pady=10)
+
+        tk.Label(self.login_window, text="Role").pack()
+
+        self.role_var = tk.StringVar()
+        self.role_var.set("supervisor")
+
+        tk.OptionMenu(
+            self.login_window,
+            self.role_var,
+            "supervisor",
+            "account"
+            ).pack()
+
 
         tk.Label(self.login_window, text="Username").pack()
         self.entry_username = tk.Entry(self.login_window)
@@ -188,28 +283,26 @@ class StudentResultApp:
         username = self.entry_username.get().strip()
         password = self.entry_password.get().strip()
 
-        if not username or not password:
-            messagebox.showerror("Error", "All fields required")
-            return
-
         conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM users WHERE username=? AND password=?",
+            "SELECT role FROM users WHERE username=? AND password=?",
             (username, password)
         )
-        user = cursor.fetchone()
+        row = cursor.fetchone()
         conn.close()
 
-        if user:
+        if row:
+            self.user_role = row[0]   # 🔑 store role
             self.login_window.destroy()
             self.show_main_app()
         else:
-            messagebox.showerror("Login Failed", "Invalid username or password")
+            messagebox.showerror("Login Failed", "Invalid credentials")
+
     def signup(self):
-            
         username = self.entry_username.get().strip()
         password = self.entry_password.get().strip()
+        role = self.role_var.get()
 
         if not username or not password:
             messagebox.showerror("Error", "All fields required")
@@ -220,18 +313,27 @@ class StudentResultApp:
 
         try:
             cursor.execute(
-                "INSERT INTO users (username, password) VALUES (?, ?)",
-                (username, password)
+                "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                (username, password, role)
             )
             conn.commit()
-            messagebox.showinfo(
-                "Success",
-                "Signup successful! You can now login."
-            )
+            messagebox.showinfo("Success", "User created successfully")
         except sqlite3.IntegrityError:
             messagebox.showerror("Error", "Username already exists")
         finally:
             conn.close()
+
+
+    def get_grade(self, percent):
+        if percent >= 90:
+            return "A"
+        elif percent >= 75:
+            return "B"
+        elif percent >= 60:
+            return "C"
+        else:
+            return "Fail"
+
     def show_main_app(self):
         self.root = tk.Tk()
         self.root.title("Student Result Management System")
@@ -242,47 +344,28 @@ class StudentResultApp:
 
         tk.Button(self.root, text="Logout",
                   fg="red", command=self.logout).pack()
-
-        tk.Label(self.root, text="Student Name").pack()
-        self.entry_name = tk.Entry(self.root)
-        self.entry_name.pack()
-
-        tk.Label(self.root, text="Admission Year").pack()
-        self.entry_year = tk.Entry(self.root)
-        self.entry_year.pack()
-
-        tk.Label(self.root, text="Class Name").pack()
-        self.entry_class = tk.Entry(self.root)
-        self.entry_class.pack()
         
-        """tk.Label(self.root, text="Subject 1 Marks").pack()
-        self.entry_s1 = tk.Entry(self.root)
-        self.entry_s1.pack()
+        # Supervisor-only buttons
+        if self.user_role == "supervisor":
+            tk.Button(self.root, text="Register Student",
+                    command=self.open_register_student).pack(pady=5)
 
-        tk.Label(self.root, text="Subject 2 Marks").pack()
-        self.entry_s2 = tk.Entry(self.root)
-        self.entry_s2.pack()
+            tk.Button(self.root, text="Enter Marks",
+                     command=self.open_marks_window).pack(pady=5)
 
-        tk.Label(self.root, text="Subject 3 Marks").pack()
-        self.entry_s3 = tk.Entry(self.root)
-        self.entry_s3.pack()"""
+            tk.Button(self.root, text="Add Exam",
+                     command=self.add_exam).pack(pady=5)
 
-        tk.Button(self.root, text="Add Result", command=self.add_student).pack(pady=5)
-        tk.Button(self.root,text="Register Student",command=self.open_register_student).pack(pady=5)
-
-
-        tk.Label(self.root, text="Search (Name / ID)").pack()
-        self.entry_search = tk.Entry(self.root)
-        self.entry_search.pack()
-
-        tk.Button(self.root,text="Enter Marks",command=self.open_marks_window).pack(pady=5)
+# Common buttons
+        tk.Button(self.root, text="View Report",
+                     command=self.open_report_window).pack(pady=5)
 
 
-        #tk.Button(self.root, text="Search", command=self.search_student).pack(pady=5)
+        
 
-        #tk.Button(self.root, text="View Results",command=self.view_results).pack(pady=5)
 
-        #tk.Button(self.root, text="Export to Excel",  command=self.export_to_excel).pack(pady=5)
+
+        
 
         self.result_text = tk.Text(self.root, height=10)
         self.result_text.pack(pady=10)
@@ -311,83 +394,167 @@ class StudentResultApp:
         ).pack()
 
 
-        tk.Button(self.root, text="Add Exam" , command=self.add_exam).pack(pady=5)
+
+
+        tk.Button(self.root, text="Export Results to Excel", command=self.export_to_excel).pack(pady=5)
+
 
 
         self.root.mainloop()
     def open_marks_window(self):
-        self.marks_window=tk.Toplevel(self.root)
-        self.marks_window.title("Enter Marks")  
-        self.marks_window.geometry("400x300")
+        self.marks_window = tk.Toplevel(self.root)
+        self.marks_window.title("Enter Marks")
+        self.marks_window.geometry("400x350")
 
-        tk.Label(self.marks_window, text="Enter Marks for Each Subject").pack(pady=10)
-        DB_PATH = os.path.join(BASE_DIR, "results.db")
+        tk.Label(self.marks_window, text="Enter Marks", font=("Arial", 14)).pack(pady=10)
+
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT id, exam_name, academic_year FROM exams")
-        rows = cursor.fetchall()
+
+        # --- Fetch exams ---
+        cursor.execute("SELECT id, exam_name FROM exams")
+        exam_rows = cursor.fetchall()
+        exams = [row[1] for row in exam_rows]
+
+        # --- Fetch students ---
+        cursor.execute("SELECT admission_no, student_name FROM students")
+        student_rows = cursor.fetchall()
+        students = [f"{row[0]} | {row[1]}" for row in student_rows]
+
         conn.close()
-        exams = [rows[1] for rows in rows]
+
+        if not students or not exams:
+            messagebox.showerror("Error", "Add students and exams first")
+            return
+
+        # --- Student dropdown ---
+        tk.Label(self.marks_window, text="Select Student").pack()
+        self.student_var = tk.StringVar()
+        self.student_var.set(students[0])
+        tk.OptionMenu(self.marks_window, self.student_var, *students).pack(pady=5)
+
+        # --- Exam dropdown ---
+        tk.Label(self.marks_window, text="Select Exam").pack()
         self.exam_var = tk.StringVar()
+        self.exam_var.set(exams[0])
         tk.OptionMenu(self.marks_window, self.exam_var, *exams).pack(pady=5)
-        tk.Label(self.marks_window, text="Admission No").pack()
-        self.entry_admission_no = tk.Entry(self.marks_window)
-        self.entry_admission_no.pack()
 
-        selected_exam = self.exam_var.get()
-
+        # --- Score ---
         tk.Label(self.marks_window, text="Score").pack()
         self.entry_score = tk.Entry(self.marks_window)
-        self.entry_score.pack()
+        self.entry_score.pack(pady=5)
 
         def save_marks():
-            admission_no = self.entry_admission_no.get().strip()
-            selected_exam = self.exam_var.get()
+            student_text = self.student_var.get()
+            admission_no = student_text.split(" | ")[0]
+
+            exam_name = self.exam_var.get()
             score = self.entry_score.get().strip()
-            if not admission_no or not selected_exam or not score:
-                messagebox.showerror("Error", "All fields required")
-                return
+
             if not score.isdigit():
                 messagebox.showerror("Error", "Score must be a number")
                 return
+
             score = int(score)
+
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM students WHERE admission_no=?", (admission_no,))
-            if not cursor.fetchone():
-                messagebox.showerror("Error", "No student found")
-                conn.close()
-                return
-            cursor.execute("SELECT id FROM exams WHERE exam_name=?", (selected_exam,))
-            row = cursor.fetchone()
-            if row is None:
-                messagebox.showerror("Error", "Invalid exam")
-                conn.close()
-                return
-            exam_id = row[0]
+
+            cursor.execute("SELECT id FROM exams WHERE exam_name=?", (exam_name,))
+            exam_id = cursor.fetchone()[0]
+
             cursor.execute("""
-                INSERT INTO marks (student_admission_no, exam_id, score)
+                INSERT INTO marks (admission_no, exam_id, score)
                 VALUES (?, ?, ?)
             """, (admission_no, exam_id, score))
 
             conn.commit()
             conn.close()
+
             messagebox.showinfo("Success", "Marks saved successfully")
 
+            print(admission_no, exam_name, score)
+
         tk.Button(self.marks_window, text="Save Marks", command=save_marks).pack(pady=10)
+    def open_report_window(self):
+        self.report_rows = []
 
+        report_win = tk.Toplevel(self.root)
+        report_win.title("Class Report")
+        report_win.geometry("600x450")
 
+        # ---- Fetch classes ----
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT class_name FROM students")
+        classes = [row[0] for row in cursor.fetchall()]
 
-        print(rows)
-    def calculate_grade(self, total):
-        if total >= 270:
-            return "A"
-        elif total >= 210:
-            return "B"
-        elif total >= 150:
-            return "C"
-        else:
-            return "Fail"
+        cursor.execute("SELECT DISTINCT exam_name FROM exams")
+        exams = [row[0] for row in cursor.fetchall()]
+        conn.close()
+
+        if not classes or not exams:
+            messagebox.showerror("Error", "No classes or exams found")
+            return
+
+        # ---- Class dropdown ----
+        tk.Label(report_win, text="Class").pack()
+        self.class_var = tk.StringVar()
+        self.class_var.set(classes[0])
+        tk.OptionMenu(report_win, self.class_var, *classes).pack()
+
+        # ---- Exam dropdown ----
+        tk.Label(report_win, text="Exam").pack()
+        self.report_exam_var = tk.StringVar()
+        self.report_exam_var.set(exams[0])
+        tk.OptionMenu(report_win, self.report_exam_var, *exams).pack()
+
+        # ---- Report text ----
+        text = tk.Text(report_win, width=70, height=15)
+        text.pack(pady=10)
+
+        def load_report():
+            class_name = self.class_var.get()
+            exam_name = self.report_exam_var.get()
+
+            rows = fetch_class_exam_report(class_name, exam_name)
+            self.report_rows = rows
+
+            text.delete("1.0", tk.END)
+            text.insert(tk.END, "Admn No | Name | Score | Max | % | Grade\n")
+            text.insert(tk.END, "-" * 65 + "\n")
+
+            for r in rows:
+                percent = round((r[2] * 100) / r[3], 2)
+                grade = self.get_grade(percent)
+                text.insert(
+                    tk.END,
+                    f"{r[0]} | {r[1]} | {r[2]} | {r[3]} | {percent}% | {grade}\n"
+                )
+
+        def export_report():
+            if not self.report_rows:
+                messagebox.showerror("Error", "Generate report first")
+                return
+
+            data = []
+            for r in self.report_rows:
+                percent = round((r[2] * 100) / r[3], 2)
+                grade = self.get_grade(percent)
+                data.append([r[0], r[1], r[2], r[3], percent, grade])
+
+            df = pd.DataFrame(
+                data,
+                columns=["Admission No", "Student Name", "Score", "Max Marks", "Percentage", "Grade"]
+            )
+
+            filename = f"{self.class_var.get()}_{self.report_exam_var.get()}_Report.xlsx"
+            df.to_excel(filename, index=False)
+            messagebox.showinfo("Success", f"Exported {filename}")
+
+        tk.Button(report_win, text="Generate Report", command=load_report).pack(pady=5)
+        tk.Button(report_win, text="Export to Excel", command=export_report).pack(pady=5)
+
     def add_student(self):
         admission_year = self.entry_year.get().strip()
         class_name = self.entry_class.get().strip()
@@ -477,5 +644,8 @@ class StudentResultApp:
     def logout(self):
         self.root.destroy()
         self.show_login()
+
 if __name__ == "__main__":
     StudentResultApp()
+
+    
