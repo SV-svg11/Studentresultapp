@@ -14,25 +14,64 @@ def init_students_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS students
-                   ( 
+    CREATE TABLE IF NOT EXISTS students( 
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         admission_year INTEGER NOT NULL,
         admission_no TEXT NOT NULL UNIQUE,
         student_name TEXT NOT NULL,
         class_name TEXT NOT NULL,
+        year_serial INTEGER NOT NULL
                    );
                 
             """)
     conn.commit()
     conn.close()
+def generate_admission_no(admission_year):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT MAX(year_serial) FROM students WHERE admission_year=?""", (admission_year,))
+    max_serial = cursor.fetchone()[0]
+    if max_serial is None:
+        max_serial = 0
 
+    next_serial = max_serial + 1
+    admission_no = f"{admission_year}-{next_serial:03d}"
+    conn.close()
+    return next_serial, admission_no
+def init_exams_db():
+    DB_PATH = os.path.join(BASE_DIR, "results.db")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS exams(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,   
+                max_marks INTEGER NOT NULL,
+                exam_name TEXT NOT NULL,
+                exam_type TEXT NOT NULL,
+                academic_year TEXT NOT NULL
+                ); """)
+    conn.commit()
+    conn.close()
 class StudentResultApp:
+    def add_exam(self):
+        exam_type = self.exam_type_var.get()
+        exam_number = self.entry_exam_number.get().strip()
+        academic_year = self.entry_exam_year.get().strip()
+        max_marks = self.entry_max_marks.get().strip()
+
+        if not exam_number or not academic_year or not max_marks or not exam_type:
+            messagebox.showerror("Error", "All fields required")
+            return
+        if not max_marks.isdigit():
+            messagebox.showerror("Error", "Max marks must be a number")
+            return
+        if exam_number.isdigit():
+            exam_name = f"Exam {exam_number}"
     def __init__(self):    
         init_users_db()
         init_students_db()
         self.show_login()
-
     def show_login(self):
         self.login_window = tk.Tk()
         self.login_window.title("Teacher Login / Signup")
@@ -130,6 +169,14 @@ class StudentResultApp:
         self.entry_name = tk.Entry(self.root)
         self.entry_name.pack()
 
+        tk.Label(self.root, text="Admission Year").pack()
+        self.entry_year = tk.Entry(self.root)
+        self.entry_year.pack()
+
+        tk.Label(self.root, text="Class Name").pack()
+        self.entry_class = tk.Entry(self.root)
+        self.entry_class.pack()
+        
         tk.Label(self.root, text="Subject 1 Marks").pack()
         self.entry_s1 = tk.Entry(self.root)
         self.entry_s1.pack()
@@ -161,6 +208,25 @@ class StudentResultApp:
         self.result_text = tk.Text(self.root, height=10)
         self.result_text.pack(pady=10)
 
+        tk.Label(self.root, text="Exam Management", font=("Arial", 16)).pack()
+
+        self.entry_exam_number = tk.Entry(self.root)
+        self.entry_exam_number.pack()
+
+        tk.Label(self.root, text="Academic Year").pack()
+        self.entry_exam_year = tk.Entry(self.root)
+        self.entry_exam_year.pack()
+
+        tk.Label(self.root, text="Max Marks").pack()
+        self.entry_max_marks = tk.Entry(self.root)
+        self.entry_max_marks.pack()
+
+        tk.Label(self.root, text="Exam Type").pack()
+        self.exam_type_var = tk.OptionMenu(self.root, tk.StringVar(value="Midterm"), "PT", "TE", "CT").pack()
+
+        tk.Button(self.root, text="Add Exam" , command=self.add_exam).pack(pady=5)
+
+
         self.root.mainloop()
     def calculate_grade(self, total):
         if total >= 270:
@@ -172,43 +238,36 @@ class StudentResultApp:
         else:
             return "Fail"
     def add_student(self):
-        name = self.entry_name.get().strip()
-        s1 = self.entry_s1.get().strip()
-        s2 = self.entry_s2.get().strip()
-        s3 = self.entry_s3.get().strip()
+        admission_year = self.entry_year.get().strip()
+        class_name = self.entry_class.get().strip()
+        student_name = self.entry_name.get().strip()
 
-        if not name or not s1 or not s2 or not s3:
+        # 1) Presence check FIRST
+        if not student_name or not admission_year or not class_name:
             messagebox.showerror("Error", "All fields required")
             return
 
-        if not (s1.isdigit() and s2.isdigit() and s3.isdigit()):
-            messagebox.showerror("Error", "Marks must be numbers")
+        # 2) Format check
+        if not admission_year.isdigit():
+            messagebox.showerror("Error", "Admission year must be a number")
             return
 
-        s1, s2, s3 = int(s1), int(s2), int(s3)
+        # 3) Convert
+        admission_year = int(admission_year)
 
-        for m in (s1, s2, s3):
-            if m < 0 or m > 100:
-                messagebox.showerror("Error", "Marks must be 0–100")
-                return
+        # 4) Generate admission number
+        year_serial, admission_no = generate_admission_no(admission_year)
 
-        total = s1 + s2 + s3
-        grade = self.calculate_grade(total)
-
+        # 5) Insert into DB
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO students
-            (name, subject1, subject2, subject3, total, grade)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (name, s1, s2, s3, total, grade))
+            (admission_year, year_serial, admission_no, student_name, class_name)
+            VALUES (?, ?, ?, ?, ?)
+        """, (admission_year, year_serial, admission_no, student_name, class_name))
         conn.commit()
-        conn.close()
-
-        messagebox.showinfo("Success",
-                            f"Total: {total}\nGrade: {grade}")
-
-        self.clear_fields()
+        conn.close()          
     def search_student(self):
         keyword = self.entry_search.get()
 
