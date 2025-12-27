@@ -1,9 +1,9 @@
 My project should first
 -> First logins the user✅
 ->There should be 2 users✅
-  -> Superuser
-  -> Account manager (view reports ,)
-  -> Teacher (enter marks )
+  -> Superuser✅
+  -> Account manager (view reports ,)✅
+  -> Teacher (enter marks )✅
 -> First ask the exam type✅
 -> Then ask the class number and section✅
 -> Enter the name and marks✅
@@ -13,7 +13,7 @@ My project should first
 
 What had been achieved
 -> First logins the user , enabled sign up and login into the software ✅
--> Can enter the name of the student  and marks and software is able to calculate the total and grade and pass/fail❌
+-> Can enter the name of the student  and marks and software is able to calculate the total and grade and pass/fail✅
 -> Able to find the student record✅
 -> Able to logout and able a sign up a new account✅
 -> It is able to export the data in xlsx form ✅
