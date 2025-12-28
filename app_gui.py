@@ -638,64 +638,65 @@ class StudentResultApp:
                 widget.destroy()
 
             exam_name = self.exam_var.get()
+            admission_no = self.student_var.get().split(" | ")[0]
 
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
 
-            # 1️⃣ get exam_id FIRST
+            # ---- exam_id ----
             cursor.execute("SELECT id FROM exams WHERE exam_name=?", (exam_name,))
             row = cursor.fetchone()
+            print("DEBUG exam_name:", exam_name)
+            print("DEBUG exam_row:", row)
+
             if not row:
                 messagebox.showerror("Error", "Invalid exam")
                 conn.close()
                 return
             exam_id = row[0]
 
-
-            if not row:
-                messagebox.showerror("Error", "Invalid exam")
-                conn.close()
-                return
-
-            exam_id = row[0]
-            admission_no = self.student_var.get().split(" | ")[0]
-
+            # ---- class_name ----
             cursor.execute(
                 "SELECT class_name FROM students WHERE admission_no=?",
                 (admission_no,)
             )
-            class_name = cursor.fetchone()[0]
+            row = cursor.fetchone()
+            print("DEBUG admission_no:", admission_no)
+            print("DEBUG student_class:", row)
 
+            if not row:
+                messagebox.showerror("Error", "Student class not found")
+                conn.close()
+                return
+            class_name = row[0]
 
+            # ---- exam_subjects ----
             cursor.execute("""
-            SELECT es.id, s.subject_name
-            FROM exam_subjects es
-            JOIN subjects s ON es.subject_id = s.id
-            WHERE es.exam_id = ? AND es.class_name = ?
+                SELECT es.id, s.subject_name
+                FROM exam_subjects es
+                JOIN subjects s ON es.subject_id = s.id
+                WHERE es.exam_id = ? AND es.class_name = ?
             """, (exam_id, class_name))
-            
-
-
-
 
             rows = cursor.fetchall()
+            print("DEBUG exam_subject_rows:", rows)
+
             conn.close()
 
             if not rows:
                 messagebox.showerror(
                     "No Subjects",
-                    "No subjects configured for this exam"
+                    f"No subjects configured for {class_name} - {exam_name}"
                 )
                 return
 
             self.subject_entries = {}
-
             for exam_subject_id, subject_name in rows:
                 tk.Label(marks_frame, text=subject_name).pack()
                 entry = tk.Entry(marks_frame)
                 entry.pack()
-
                 self.subject_entries[exam_subject_id] = entry
+
 
         tk.Button(self.marks_window, text="Load Subjects", command=load_subjects).pack(pady=5)
 
@@ -819,9 +820,28 @@ class StudentResultApp:
             else:
                 messagebox.showwarning("Warning", "No subjects selected")
 
+        def discard_config():
+            """Reset all subject checkboxes and max-mark entries after confirmation."""
+            if not messagebox.askyesno("Discard Changes", "Discard unsaved changes?"):
+                return
+            for subject_id, (var, entry) in subject_vars.items():
+                try:
+                    var.set(0)
+                except Exception:
+                    pass
+                try:
+                    entry.delete(0, tk.END)
+                except Exception:
+                    pass
+            messagebox.showinfo("Discarded", "Unsaved changes have been discarded")
+
         tk.Button(win, text="Save Configuration",
                 font=("Arial", 11),
                 command=save_config).pack(pady=10)
+
+        tk.Button(win, text="Discard Changes",
+                font=("Arial", 11),
+                command=discard_config).pack(pady=5)
 
     def open_report_window(self):
         self.report_rows = []
