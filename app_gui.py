@@ -94,27 +94,31 @@ def migrate_exam_subjects():
         pass
     conn.close()
 def fetch_class_exam_report(class_name, exam_name):
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
 
-        cursor.execute("""
+    cursor.execute("""
         SELECT
             s.admission_no,
             s.student_name,
             m.score,
-            e.max_marks,
-            ROUND((m.score * 100.0) / e.max_marks, 2) AS percentage
+            es.max_marks,
+            ROUND((m.score * 100.0) / es.max_marks, 2) AS percentage
+        FROM students s
+        JOIN marks m
+            ON s.admission_no = m.admission_no
+        JOIN exam_subjects es
+            ON m.exam_subject_id = es.id
+        JOIN exams e
+            ON es.exam_id = e.id
+        WHERE s.class_name = ?
+          AND e.exam_name = ?
+    """, (class_name, exam_name))
 
-            FROM students s
-            JOIN marks m ON s.admission_no = m.admission_no
-            JOIN exams e ON m.exam_id = e.id
-            WHERE s.class_name = ?
-            AND e.exam_name = ?
-        """, (class_name, exam_name))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
 
-        rows = cursor.fetchall()
-        conn.close()
-        return rows
 def init_users_db():
     conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
