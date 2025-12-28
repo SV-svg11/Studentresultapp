@@ -140,6 +140,9 @@ def seed_subjects():
     conn.commit()
     conn.close()
 
+    
+
+
 def init_students_db():
     DB_PATH = os.path.join(BASE_DIR, "results.db")
     conn = sqlite3.connect(DB_PATH)
@@ -342,6 +345,7 @@ class StudentResultApp:
         init_users_db()
         migrate_users_table()
         init_subjects_db()
+        seed_subjects()  
         init_students_db()
         init_exams_db()
         migrate_exams_table() 
