@@ -18,3 +18,11 @@ What had been achieved
 -> Able to logout and able a sign up a new account✅
 -> It is able to export the data in xlsx form ✅
 
+Why is this project for:
+-> It is for storing exam results of various classes
+-> Helps us to recollect the data whenever we want from the database
+
+Features:
+-> User credentials (helps in safety)
+-> Limited permissions (Supervisor - everything , teacher - marks  , account - )
+
