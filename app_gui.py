@@ -8,6 +8,8 @@ import sqlite3
 import tkinter as tk
 from tkinter import messagebox
 import pandas as pd
+import hashlib
+import hmac
 
 #-------------------------------------------------------------------------------------------------------------------------------------------#
 
@@ -30,6 +32,49 @@ def migrate_users_table():
         pass  # column already exists
 
     conn.close()
+def migrate_users_passwords():
+    """Add password_hash column and migrate existing plaintext passwords to hashed form."""
+    conn = sqlite3.connect(USERS_DB)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
+    # For any user rows that don't have password_hash filled, generate one from the existing password
+    cursor.execute("SELECT id, password FROM users WHERE password IS NOT NULL AND (password_hash IS NULL OR password_hash = '')")
+    rows = cursor.fetchall()
+    for uid, plain in rows:
+        if not plain:
+            continue
+        ph = hash_password(plain)
+        cursor.execute("UPDATE users SET password_hash=? WHERE id=?", (ph, uid))
+
+    # Optionally clear plaintext passwords to avoid accidental reuse
+    try:
+        cursor.execute("UPDATE users SET password='' WHERE password IS NOT NULL")
+    except Exception:
+        pass
+
+    conn.commit()
+    conn.close()
+def hash_password(password: str) -> str:
+    """Hash a password using PBKDF2-HMAC-SHA256. Returns salt$hash hex string."""
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
+    return salt.hex() + "$" + dk.hex()
+
+def verify_password(password: str, stored: str) -> bool:
+    """Verify a plaintext password against stored salt$hash."""
+    try:
+        salt_hex, hash_hex = stored.split("$")
+    except Exception:
+        return False
+    salt = bytes.fromhex(salt_hex)
+    expected = bytes.fromhex(hash_hex)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
+    return hmac.compare_digest(dk, expected)
 def migrate_exams_table():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -77,8 +122,9 @@ def init_users_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL UNIQUE,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('supervisor', 'account'))
+            password TEXT,
+            password_hash TEXT,
+            role TEXT NOT NULL CHECK(role IN ('supervisor', 'teacher', 'account'))
         )
     """)
     conn.commit()
@@ -344,6 +390,7 @@ class StudentResultApp:
     def __init__(self):    
         init_users_db()
         migrate_users_table()
+        migrate_users_passwords()
         init_subjects_db()
         seed_subjects()  
         init_students_db()
@@ -407,18 +454,14 @@ class StudentResultApp:
     def login(self):
         username = self.entry_username.get().strip()
         password = self.entry_password.get().strip()
-
         conn = sqlite3.connect(USERS_DB)
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT role FROM users WHERE username=? AND password=?",
-            (username, password)
-        )
+        cursor.execute("SELECT password_hash, role FROM users WHERE username=?", (username,))
         row = cursor.fetchone()
         conn.close()
 
-        if row:
-            self.user_role = row[0]   # 🔑 store role
+        if row and row[0] and verify_password(password, row[0]):
+            self.user_role = row[1]
             self.login_window.destroy()
             self.show_main_app()
         else:
@@ -436,9 +479,11 @@ class StudentResultApp:
         cursor = conn.cursor()
 
         try:
+            p_hash = hash_password(password)
+            # store plaintext password as empty string and keep the hash in password_hash
             cursor.execute(
-                "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-                (username, password, role)
+                "INSERT INTO users (username, password, password_hash, role) VALUES (?, ?, ?, ?)",
+                (username, '', p_hash, role)
             )
             conn.commit()
             messagebox.showinfo("Success", "User created successfully")
