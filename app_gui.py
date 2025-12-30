@@ -31,9 +31,88 @@ import hmac                    # Secure password verification
 
 # ===== DATABASE CONFIGURATION =====
 # Define the base directory and database file paths
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+HOME_DIR = os.path.expanduser("~")
+CONFIG_FILE = os.path.join(HOME_DIR, ".studentresultapp_config.txt")
+
+def _get_database_path():
+    """
+    Determine the database path from multiple sources:
+    1. STUDENT_APP_DB_PATH environment variable (highest priority)
+    2. .studentresultapp_config.txt file in home directory
+    3. Default fallback to ~/.studentresultapp or script directory
+    
+    Returns:
+        str: The base directory for database files
+    """
+    # Check environment variable first
+    env_path = os.environ.get("STUDENT_APP_DB_PATH")
+    if env_path:
+        env_path = os.path.expanduser(env_path)
+        if os.path.isdir(env_path):
+            return env_path
+        else:
+            os.makedirs(env_path, exist_ok=True)
+            return env_path
+    
+    # Check config file in home directory
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config_path = f.read().strip()
+                # Skip comments and empty lines
+                config_path = config_path.split('#')[0].strip()
+                if config_path:
+                    config_path = os.path.expanduser(config_path)
+                    if not os.path.exists(config_path):
+                        os.makedirs(config_path, exist_ok=True)
+                    return config_path
+        except:
+            pass
+    
+    # Try script directory first
+    try:
+        test_file = os.path.join(SCRIPT_DIR, ".write_test")
+        open(test_file, "w").close()
+        os.remove(test_file)
+        return SCRIPT_DIR
+    except (IOError, OSError, PermissionError):
+        pass
+    
+    # Fall back to user's home directory
+    fallback = os.path.join(HOME_DIR, ".studentresultapp")
+    os.makedirs(fallback, exist_ok=True)
+    return fallback
+
+def _create_default_config():
+    """Create a default config file if it doesn't exist."""
+    if not os.path.exists(CONFIG_FILE):
+        default_config = """# Student Result Management System - Database Configuration
+# Edit this file to specify where database files should be stored
+# Use absolute paths or ~ for home directory
+# Examples:
+#   C:\\MyDatabases\\StudentApp
+#   ~/.studentresultapp
+#   C:\\Users\\MyName\\AppData\\Local\\StudentApp
+
+~/.studentresultapp
+"""
+        try:
+            with open(CONFIG_FILE, "w") as f:
+                f.write(default_config)
+        except:
+            pass
+
+BASE_DIR = _get_database_path()
 DB_PATH = os.path.join(BASE_DIR, "results.db")      # Main results database
 USERS_DB = os.path.join(BASE_DIR, "users.db")       # User authentication database
+
+# Ensure the directory exists for database files
+if not os.path.exists(BASE_DIR):
+    os.makedirs(BASE_DIR, exist_ok=True)
+
+# Create config file for user reference
+_create_default_config()
 
 # ===== DATABASE MIGRATION FUNCTIONS =====
 # These functions safely add new columns to existing tables without breaking old data
@@ -65,7 +144,8 @@ def migrate_users_table():
     This allows assigning different access levels to users.
     Roles: 'supervisor' (full access), 'teacher' (marks & reports), 'account' (admin tasks)
     """
-    conn = sqlite3.connect(USERS_DB)
+    os.makedirs(BASE_DIR, exist_ok=True)
+    conn = sqlite3.connect(USERS_DB, timeout=10)
     cursor = conn.cursor()
 
     try:
@@ -88,7 +168,8 @@ def migrate_users_passwords():
     2. Hash any existing plaintext passwords
     3. Clear plaintext passwords from database
     """
-    conn = sqlite3.connect(USERS_DB)
+    os.makedirs(BASE_DIR, exist_ok=True)
+    conn = sqlite3.connect(USERS_DB, timeout=10)
     cursor = conn.cursor()
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
@@ -169,7 +250,8 @@ def verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(dk, expected)
 def migrate_exams_table():
     """Add 'max_marks' column to exams table for storing maximum marks per exam."""
-    conn = sqlite3.connect(DB_PATH)
+    os.makedirs(BASE_DIR, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     cursor = conn.cursor()
     try:
         cursor.execute("ALTER TABLE exams ADD COLUMN max_marks INTEGER")
@@ -181,7 +263,8 @@ def migrate_exams_table():
 
 def migrate_exam_subjects():
     """Add 'class_name' column to exam_subjects to track subject configuration per class."""
-    conn = sqlite3.connect(DB_PATH)
+    os.makedirs(BASE_DIR, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     cursor = conn.cursor()
     try:
         cursor.execute("ALTER TABLE exam_subjects ADD COLUMN class_name TEXT")
@@ -243,7 +326,8 @@ def init_users_db():
     - role: User role - 'supervisor' (full access), 'teacher' (marks & reports), 
             'account' (administrative tasks)
     """
-    conn = sqlite3.connect(USERS_DB)
+    os.makedirs(BASE_DIR, exist_ok=True)
+    conn = sqlite3.connect(USERS_DB, timeout=10)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -264,6 +348,7 @@ def init_subjects_db():
     Stores all available subjects that can be assigned to exams.
     Each subject is unique and can be reused across multiple exams and classes.
     """
+    os.makedirs(BASE_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
@@ -308,7 +393,8 @@ def init_exam_subjects_db():
     - subject_id: Which subject
     - max_marks: Maximum marks for this subject in this exam
     """
-    conn = sqlite3.connect(DB_PATH)
+    os.makedirs(BASE_DIR, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS exam_subjects (
@@ -328,31 +414,48 @@ def seed_subjects():
     This function creates initial subject entries which can be used when
     configuring exams. Uses INSERT OR IGNORE to safely handle re-runs.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    try:
+        # Ensure database directory exists
+        os.makedirs(BASE_DIR, exist_ok=True)
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        cursor = conn.cursor()
+        
+        # Verify the subjects table exists before inserting
+        cursor.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name='subjects'
+        """)
+        if not cursor.fetchone():
+            raise RuntimeError("subjects table does not exist. Init function may have failed.")
 
-    # Define standard school subjects
-    subjects = [
-        "English",      # Language subject
-        "2l",           # Second language
-        "3l",           # Third language
-        "Maths",        # Mathematics
-        "Science",      # Science (general)
-        "Social",       # Social studies
-        "EVS",          # Environmental studies
-        "Computer",     # Computer science
-        "GK"            # General knowledge
-    ]
+        # Define standard school subjects
+        subjects = [
+            "English",      # Language subject
+            "2l",           # Second language
+            "3l",           # Third language
+            "Maths",        # Mathematics
+            "Science",      # Science (general)
+            "Social",       # Social studies
+            "EVS",          # Environmental studies
+            "Computer",     # Computer science
+            "GK"            # General knowledge
+        ]
 
-    # Insert each subject, ignoring if it already exists
-    for s in subjects:
-        cursor.execute(
-            "INSERT OR IGNORE INTO subjects (subject_name) VALUES (?)",
-            (s,)
-        )
+        # Insert each subject, ignoring if it already exists
+        for s in subjects:
+            cursor.execute(
+                "INSERT OR IGNORE INTO subjects (subject_name) VALUES (?)",
+                (s,)
+            )
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
+    except sqlite3.OperationalError as e:
+        print(f"Error seeding subjects: {e}")
+        print(f"Database path: {DB_PATH}")
+        print(f"Directory exists: {os.path.exists(BASE_DIR)}")
+        raise
 
     
 
@@ -371,8 +474,8 @@ def init_students_db():
     - class_name: Current class/section (e.g., "Class 5-A")
     - year_serial: Sequential number within admission year
     """
-    DB_PATH = os.path.join(BASE_DIR, "results.db")
-    conn = sqlite3.connect(DB_PATH)
+    os.makedirs(BASE_DIR, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     cursor = conn.cursor()
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS students( 
@@ -429,8 +532,8 @@ def init_exams_db():
     - exam_type: Type of exam - "PT" (Periodic Test) or "TE" (Terminal Exam)
     - academic_year: Academic year (e.g., "2024-2025")
     """
-    DB_PATH = os.path.join(BASE_DIR, "results.db")
-    conn = sqlite3.connect(DB_PATH)
+    os.makedirs(BASE_DIR, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     cursor = conn.cursor()
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS exams(
@@ -456,7 +559,8 @@ def init_marks_db():
     - exam_subject_id: Reference to specific exam/subject/class configuration
     - score: Marks obtained by the student in this subject
     """
-    conn = sqlite3.connect(DB_PATH)
+    os.makedirs(BASE_DIR, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS marks (
@@ -481,7 +585,8 @@ def init_classes_db():
     - section: Section/division (e.g., "A", "B", "C")
     - Composite unique constraint prevents duplicate class-section combinations
     """
-    conn = sqlite3.connect(DB_PATH)
+    os.makedirs(BASE_DIR, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS classes (
